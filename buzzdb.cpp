@@ -1,3 +1,10 @@
+/*
+    This file belongs to https://github.com/jarulraj/buzzdb/
+    Publicly available under Apache 2.0 License
+    This file has been taken as the database unit file in our efforts to build a replicated datastore
+    with RAFT distributed consensus algorithm.
+    Complete credits goes to Prof. Joy Arulraj https://github.com/jarulraj
+ */
 #include <iostream>
 #include <map>
 #include <vector>
