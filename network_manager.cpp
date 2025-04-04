@@ -11,14 +11,15 @@ class NetworkManager {
     int node_id;
     bool running;
     std::thread receiver_thread;
+    const int base_port;
 
-    // Message handlers
-    std::function<void(const RequestVoteRequest&)> vote_request_handler;
-    std::function<void(const RequestVoteResponse&)> vote_response_handler;
-    std::function<void(const AppendEntriesRequest&)> append_entries_handler;
-    std::function<void(const AppendEntriesResponse&)> append_response_handler;
-    std::function<void(const ClientRequest&)> client_request_handler;
-    std::function<void(const ClientResponse&)> client_response_handler;
+    // Updated handlers with sender_id parameter
+    std::function<void(int, const RequestVoteRequest&)> vote_request_handler;
+    std::function<void(int, const RequestVoteResponse&)> vote_response_handler;
+    std::function<void(int, const AppendEntriesRequest&)> append_entries_handler;
+    std::function<void(int, const AppendEntriesResponse&)> append_response_handler;
+    std::function<void(int, const ClientRequest&)> client_request_handler;
+    std::function<void(int, const ClientResponse&)> client_response_handler;
 
 public:
     struct NodeConfig {
@@ -28,14 +29,20 @@ public:
 
     std::unordered_map<int, NodeConfig> nodes;
 
-    NetworkManager(int node_id, int base_port = 5000) : node_id(node_id), running(false) {
-        // Create UDP socket
+    NetworkManager(int node_id, int base_port = 5000) : 
+        node_id(node_id), base_port(base_port), running(false) {
+        
+        if (node_id < 0 || node_id > 2) {
+            throw std::runtime_error("Invalid node ID (0-2 allowed)");
+        }
+
+        // Create and configure UDP socket
         sockfd = socket(AF_INET, SOCK_DGRAM, 0);
         if (sockfd < 0) {
             throw std::runtime_error("Socket creation failed");
         }
 
-        // Configure nodes (0-2)
+        // Configure all nodes
         for (int i = 0; i < 3; i++) {
             NodeConfig cfg;
             cfg.id = i;
@@ -45,7 +52,7 @@ public:
             nodes[i] = cfg;
         }
 
-        // Bind to our own port
+        // Bind to configured port
         sockaddr_in servaddr{};
         servaddr.sin_family = AF_INET;
         servaddr.sin_port = nodes[node_id].address.sin_port;
@@ -78,65 +85,71 @@ public:
         }
     }
 
-    // Message sending methods
+    // Updated message sending with better logging
     void send_to(int node_id, const RequestVoteRequest& msg) {
         std::string data = "VTEREQ" + msg.serialize();
         send_raw(node_id, data);
-        std::cout << "Node " << node_id << ": Sent vote request: " << data << "\n";
+        std::cout << "Node " << this->node_id << " -> Node " << node_id 
+                  << " | VoteRequest: term=" << msg.term << "\n";
     }
 
     void send_to(int node_id, const RequestVoteResponse& msg) {
         std::string data = "VTERES" + msg.serialize();
         send_raw(node_id, data);
-        std::cout << "Node " << node_id << ": Sent vote response: " << data << "\n";
+        std::cout << "Node " << this->node_id << " -> Node " << node_id 
+                  << " | VoteResponse: granted=" << msg.vote_granted << "\n";
     }
 
     void send_to(int node_id, const AppendEntriesRequest& msg) {
         std::string data = "APPREQ" + msg.serialize();
         send_raw(node_id, data);
-        std::cout << "Node " << node_id << ": Sent append request: " << data << "\n";
+        std::cout << "Node " << this->node_id << " -> Node " << node_id 
+                  << " | AppendEntries: entries=" << msg.entries.size() << "\n";
     }
 
     void send_to(int node_id, const AppendEntriesResponse& msg) {
         std::string data = "APPRES" + msg.serialize();
         send_raw(node_id, data);
-        std::cout << "Node " << node_id << ": Sent append response: " << data << "\n";
+        std::cout << "Node " << this->node_id << " -> Node " << node_id 
+                  << " | AppendResponse: success=" << msg.success << "\n";
     }
 
     void send_to(int node_id, const ClientRequest& msg) {
         std::string data = "CLIREQ" + msg.serialize();
         send_raw(node_id, data);
-        std::cout << "Node " << node_id << ": Sent client request: " << data << "\n";
+        std::cout << "Node " << this->node_id << " -> Node " << node_id 
+                  << " | ClientRequest: " << msg.key << "=" << msg.value << "\n";
     }
 
     void send_to(int node_id, const ClientResponse& msg) {
         std::string data = "CLIRES" + msg.serialize();
         send_raw(node_id, data);
-        std::cout << "Node " << node_id << ": Sent client request: " << data << "\n";
+        std::cout << "Node " << this->node_id << " -> Node " << node_id 
+                  << " | ClientResponse: " << (msg.success ? "OK" : "ERROR") << "\n";
     }
 
-    // Handler registration
-    void set_on_request_vote(std::function<void(const RequestVoteRequest&)> handler) {
+    // Updated handler registration with sender_id parameter
+    void set_on_request_vote(std::function<void(int, const RequestVoteRequest&)> handler) {
         vote_request_handler = handler;
     }
 
-    void set_on_vote_reply(std::function<void(const RequestVoteResponse&)> handler) {
+    void set_on_vote_reply(std::function<void(int, const RequestVoteResponse&)> handler) {
         vote_response_handler = handler;
     }
 
-    void set_on_append_entries(std::function<void(const AppendEntriesRequest&)> handler) {
+    void set_on_append_entries(std::function<void(int, const AppendEntriesRequest&)> handler) {
         append_entries_handler = handler;
     }
 
-    void set_on_append_reply(std::function<void(const AppendEntriesResponse&)> handler) {
+    void set_on_append_reply(std::function<void(int, const AppendEntriesResponse&)> handler) {
         append_response_handler = handler;
     }
 
-    void set_on_client_request(std::function<void(const ClientRequest&)> handler) {
+    void set_on_client_request(std::function<void(int, const ClientRequest&)> handler) {
         client_request_handler = handler;
     }
 
-    void set_on_client_response(std::function<void(const ClientResponse&)> handler) {
+    void set_on_client_response(std::function<void(int, const ClientResponse&)> handler) {
         client_response_handler = handler;
     }
 
@@ -157,39 +170,60 @@ private:
                                 (sockaddr*)&cliaddr, &len);
             if (n <= 0) continue;
 
+            // Extract sender information
+            int sender_port = ntohs(cliaddr.sin_port);
+            int sender_id = sender_port - base_port;
+
+            if (sender_id < 0 || sender_id > 2) {
+                std::cerr << "Received message from invalid node: " << sender_port << "\n";
+                continue;
+            }
+
             std::string data(buffer, n);
-            if (data.size() < 6) continue;  // Minimum header size
+            if (data.size() < 6) continue;
 
             std::string header = data.substr(0, 6);
             std::string payload = data.substr(6);
 
             try {
                 if (header == "VTEREQ") {
-                    std::cout << "Node " << node_id << ": Received vote request: " << payload << "\n";
-                    if (vote_request_handler) vote_request_handler(RequestVoteRequest::deserialize(payload));
+                    auto msg = RequestVoteRequest::deserialize(payload);
+                    std::cout << "Node " << node_id << " <- Node " << sender_id 
+                              << " | VoteRequest: term=" << msg.term << "\n";
+                    if (vote_request_handler) vote_request_handler(sender_id, msg);
                 }
                 else if (header == "VTERES") {
-                    std::cout << "Node " << node_id << ": Received vote response: " << payload << "\n";
-                    if (vote_response_handler) vote_response_handler(RequestVoteResponse::deserialize(payload));
+                    auto msg = RequestVoteResponse::deserialize(payload);
+                    std::cout << "Node " << node_id << " <- Node " << sender_id 
+                              << " | VoteResponse: granted=" << msg.vote_granted << "\n";
+                    if (vote_response_handler) vote_response_handler(sender_id, msg);
                 }
                 else if (header == "APPREQ") {
-                    std::cout << "Node " << node_id << ": Received append request: " << payload << "\n";
-                    if (append_entries_handler) append_entries_handler(AppendEntriesRequest::deserialize(payload));
+                    auto msg = AppendEntriesRequest::deserialize(payload);
+                    std::cout << "Node " << node_id << " <- Node " << sender_id 
+                              << " | AppendEntries: entries=" << msg.entries.size() << "\n";
+                    if (append_entries_handler) append_entries_handler(sender_id, msg);
                 }
                 else if (header == "APPRES") {
-                    std::cout << "Node " << node_id << ": Received append response: " << payload << "\n";
-                    if (append_response_handler) append_response_handler(AppendEntriesResponse::deserialize(payload));
+                    auto msg = AppendEntriesResponse::deserialize(payload);
+                    std::cout << "Node " << node_id << " <- Node " << sender_id 
+                              << " | AppendResponse: success=" << msg.success << "\n";
+                    if (append_response_handler) append_response_handler(sender_id, msg);
                 }
                 else if (header == "CLIREQ") {
-                    std::cout << "Node " << node_id << ": Received client request: " << payload << "\n";
-                    if (client_request_handler) client_request_handler(ClientRequest::deserialize(payload));
+                    auto msg = ClientRequest::deserialize(payload);
+                    std::cout << "Node " << node_id << " <- Node " << sender_id 
+                              << " | ClientRequest: " << msg.key << "=" << msg.value << "\n";
+                    if (client_request_handler) client_request_handler(sender_id, msg);
                 }
                 else if (header == "CLIRES") {
-                    std::cout << "Node " << node_id << ": Received client response: " << payload << "\n";
-                    if (client_response_handler) client_response_handler(ClientResponse::deserialize(payload));
+                    auto msg = ClientResponse::deserialize(payload);
+                    std::cout << "Node " << node_id << " <- Node " << sender_id 
+                              << " | ClientResponse: " << (msg.success ? "OK" : "ERROR") << "\n";
+                    if (client_response_handler) client_response_handler(sender_id, msg);
                 }
             } catch (const std::exception& e) {
-                std::cerr << "Failed to process message: " << e.what() << std::endl;
+                std::cerr << "Message processing error: " << e.what() << "\n";
             }
         }
     }

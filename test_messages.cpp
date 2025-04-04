@@ -218,70 +218,76 @@
 //    return 0;
 //}
 
-
 #include <iostream>
 #include <thread>
 #include <functional>
-//#include "messages.cpp"
 #include "network_manager.cpp"
-
-const int BASE_PORT = 5000;
 
 class Node {
     int node_id;
     NetworkManager network;
-    bool running;
 
 public:
-    Node(int id) : node_id(id), network(id, BASE_PORT), running(true) {
-        // Register message handlers
-        network.set_on_request_vote([this](const RequestVoteRequest& req) {
-            handle_vote_request(req);
+    Node(int id) : node_id(id), network(id, 5000) {
+        // Register message handlers with sender IDs
+        network.set_on_request_vote([this](int sender_id, const RequestVoteRequest& req) {
+            handle_vote_request(sender_id, req);
         });
 
-        network.set_on_vote_reply([this](const RequestVoteResponse& res) {
-            handle_vote_response(res);
+        network.set_on_vote_reply([this](int sender_id, const RequestVoteResponse& res) {
+            handle_vote_response(sender_id, res);
         });
 
-        network.set_on_append_entries([this](const AppendEntriesRequest& req) {
-            handle_append_entries(req);
+        network.set_on_append_entries([this](int sender_id, const AppendEntriesRequest& req) {
+            handle_append_entries(sender_id, req);
         });
 
-        network.set_on_client_request([this](const ClientRequest& req) {
-            handle_client_request(req);
+        network.set_on_client_request([this](int sender_id, const ClientRequest& req) {
+            handle_client_request(sender_id, req);
         });
 
         network.start();
     }
 
-    void handle_vote_request(const RequestVoteRequest& req) {
-        std::cout << "Node " << node_id << ": Received vote request from "
-                  << req.candidate_id << " (term " << req.term << ")\n";
+    void handle_vote_request(int sender_id, const RequestVoteRequest& req) {
+        std::cout << "[Node " << node_id << "] Received vote request from node "
+                  << sender_id << " (term " << req.term << ")\n";
 
-        // Create response
         RequestVoteResponse res;
-        res.term = req.term + 1;
+        res.term = req.term + 1;  // Simplified term handling
         res.vote_granted = true;
 
-        // Send response
-        network.send_to(req.candidate_id, res);
+        // Send response back to the requesting node
+        network.send_to(sender_id, res);
     }
 
-    void handle_vote_response(const RequestVoteResponse& res) {
-        std::cout << "Node " << node_id << ": Received vote response "
-                  << (res.vote_granted ? "granted" : "denied")
+    void handle_vote_response(int sender_id, const RequestVoteResponse& res) {
+        std::cout << "[Node " << node_id << "] Received vote response from node "
+                  << sender_id << ": " << (res.vote_granted ? "GRANTED" : "DENIED")
                   << " for term " << res.term << "\n";
     }
 
-    void handle_append_entries(const AppendEntriesRequest& req) {
-        std::cout << "Node " << node_id << ": Received append entries from "
-                  << req.leader_id << " with " << req.entries.size()
-                  << " entries (term " << req.term << ")\n";
+    void handle_append_entries(int sender_id, const AppendEntriesRequest& req) {
+        std::cout << "[Node " << node_id << "] Received append entries from node "
+                  << sender_id << " (term " << req.term << ") with "
+                  << req.entries.size() << " entries\n";
+
+        // Process entries and send response
+        AppendEntriesResponse res;
+        res.term = req.term;
+        res.success = true;
+        network.send_to(sender_id, res);
     }
 
-    void handle_client_request(const ClientRequest& req) {
-        std::cout << "Node " << node_id << ": Received client request: "
-                  << req.key << " = " << req.value << "\n";
+    void handle_client_request(int sender_id, const ClientRequest& req) {
+        std::cout << "[Node " << node_id << "] Received client request from node "
+                  << sender_id << ": " << req.key << " = " << req.value << "\n";
+
+        // Process client request and send response
+        ClientResponse res;
+        res.success = true;
+        res.leader_hint = false;
+        network.send_to(sender_id, res);
     }
 
     void send_vote_request() {
@@ -294,6 +300,7 @@ public:
         // Send to all other nodes
         for(int i = 0; i < 3; i++) {
             if(i != node_id) {
+                std::cout << "[Node " << node_id << "] Sending vote request to node " << i << "\n";
                 network.send_to(i, req);
             }
         }
@@ -310,6 +317,7 @@ public:
         // Broadcast to all nodes
         for(int i = 0; i < 3; i++) {
             if(i != node_id) {
+                std::cout << "[Node " << node_id << "] Sending client request to node " << i << "\n";
                 network.send_to(i, req);
             }
         }
@@ -334,10 +342,11 @@ int main(int argc, char* argv[]) {
 
     Node node(node_id);
 
-    std::cout << "Node " << node_id << " running. Commands:\n"
-              << "1. vote - Send vote request\n"
-              << "2. insert <key> <value> - Send data\n"
-              << "3. exit - Quit\n";
+    std::cout << "\n=== Node " << node_id << " Operational ===\n"
+              << "Commands:\n"
+              << "1. vote    - Request votes from other nodes\n"
+              << "2. insert <key> <value> - Store key-value pair\n"
+              << "3. exit    - Shutdown node\n\n";
 
     std::string command;
     while(true) {
@@ -358,6 +367,12 @@ int main(int argc, char* argv[]) {
                 std::string value = command.substr(space2 + 1);
                 node.send_client_request(key, value);
             }
+            else {
+                std::cerr << "Invalid format. Use: insert <key> <value>\n";
+            }
+        }
+        else {
+            std::cerr << "Unknown command\n";
         }
     }
 
