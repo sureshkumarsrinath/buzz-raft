@@ -2,3 +2,8 @@ test_messages.o
 test_messages
 messages.o
 .idea
+output.txt
+buzzdb
+buzzdb.o
+raft_node
+raft_node.o
